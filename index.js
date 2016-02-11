@@ -2,13 +2,17 @@ const alreadyFinalized = () => {
   return new Error('promise was already finalized ');
 };
 
+const finalize = (share, err = null) => {
+  share.isFinalized = true;
+  share.finalizer(err)
+};
+
 const process = (share, id) => {
   let index = share.chain.indexOf(id);
   share.chain.splice(0, index + 1);
 
   if (!share.chain.length) {
-    share.isFinalized = true;
-    share.finalize();
+    finalize(share);
   }
 };
 
@@ -24,8 +28,9 @@ const resolve = (share, onFulfilled, result) => {
     } catch (err) {
       console.warn('(then) Unhandled Finalized Promise error: ', err.message);
 
-      share.isFinalized = true;
-      share.finalize(err);
+      //share.isFinalized = true;
+      //share.finalize(err);
+      finalize(share, err);
 
       throw err;
     }
@@ -54,8 +59,9 @@ const reject = (share, onRejected, err) => {
     } catch (err) {
       console.warn('(catch) Unhandled Finalized Promise error: ', err.message);
 
-      share.isFinalized = true;
-      share.finalize(err);
+      //share.isFinalized = true;
+      //share.finalize(err);
+      finalize(share, err);
 
       throw err;
     }
@@ -78,14 +84,39 @@ export default class FinalizePromise extends Promise {
   share = {
     increment: 0,
     isFinalized: false,
-    finalize: null,
+    finalizer: null,
     chain: []
-    //methods: []
   };
 
-  constructor(body, finalize) {
-    super(body);
-    this.share.finalize = finalize;
+  constructor(body, finalizer) {
+
+    super((resolve, reject) => {
+      const finalizeResolve = (response) => {
+        resolve(response);
+
+        if (this.share.chain.length == 0) {
+          finalize(this.share, null);
+        }
+      };
+
+      const finalizeReject = (err = null) => {
+        reject(err);
+
+        if (this.share.chain.indexOf('catch') == -1) {
+          this.share.chain.splice(0, 1);
+        }
+
+        if (this.share.chain.length == 0) {
+          finalize(this.share, err);
+        }
+      };
+
+      body(finalizeResolve, finalizeReject);
+    });
+
+    Object.assign(this.share, {
+      finalizer
+    });
   }
 
   then(onFulfilled, onRejected) {
@@ -127,5 +158,17 @@ export default class FinalizePromise extends Promise {
     });
 
     return promise;
+  }
+
+  static resolve(promise, finalizer) {
+    return new FinalizePromise(resolve => setImmediate(() => {
+      resolve(promise)
+    }), finalizer);
+  }
+
+  static reject(promise, finalizer) {
+    return new FinalizePromise((resolve, reject) => setImmediate(() => {
+      reject(promise)
+    }), finalizer);
   }
 }
