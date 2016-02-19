@@ -1,3 +1,7 @@
+const isFunction = func => {
+  return func && ({}).toString.call(func) === '[object Function]';
+};
+
 const alreadyFinalized = () => {
   return new Error('promise was already finalized ');
 };
@@ -16,7 +20,7 @@ const process = (share, id) => {
   }
 };
 
-const isPromise = obj => obj && obj.then;
+const isPromise = obj => (obj && isFunction(obj.then)) ? true : false;
 
 const resolve = (share, onFulfilled, result) => {
   let resolved = null;
@@ -89,13 +93,28 @@ export default class FinalizePromise extends Promise {
   };
 
   constructor(body, finalizer) {
+    if (finalizer && !isFunction(finalizer)) {
+      throw new Error('finalizer should be a function');
+    }
+
+    if (!finalizer) {
+      finalizer = () => {
+        console.warn('empty finalizer');
+      }
+    }
 
     super((resolve, reject) => {
       const finalizeResolve = (response) => {
         resolve(response);
-
-        if (this.share.chain.length == 0) {
-          finalize(this.share, null);
+          
+        if (!this.share.isFinalized  && this.share.chain.length == 0) {
+          if (isPromise(response)) {
+             response.then(() => {
+               finalize(this.share, null);
+             });
+          } else {
+           finalize(this.share, null); 
+          }
         }
       };
 
@@ -106,8 +125,14 @@ export default class FinalizePromise extends Promise {
           this.share.chain.splice(0, 1);
         }
 
-        if (this.share.chain.length == 0) {
-          finalize(this.share, err);
+        if (!this.share.isFinalized && this.share.chain.length == 0) {
+           if (isPromise(response)) {
+             response.then(()) => {
+               finalize(this.share, err);
+             });
+          } else {
+           finalize(this.share, err); 
+          }
         }
       };
 
